@@ -2,3 +2,4 @@
 /output/
 E-OBS_obs_daily_rr.csv
 /.idea/
+/scr/__pycache__/
