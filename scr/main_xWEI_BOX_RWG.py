@@ -20,7 +20,7 @@ from os import listdir
 import xWEI_weight
 import xWEI_EtA
 
-ws = 'D:/WEI_RWG/data_EOBS_RWG/'
+ws = 'I:/xWEI/xWEI/'
 # ---- Combine the Paul's weight generation and my interpolation --------
 # -- check the size (domain area) of each box
 # for box in range(1, 38):
@@ -35,7 +35,7 @@ ws = 'D:/WEI_RWG/data_EOBS_RWG/'
 #     )
 
 # --- generate the weights ----
-ws_weight = ws + 'xWEI/weights/'
+ws_weight = ws + 'weights/'
 
 for box in range(1, 7):
     fp_box = ws + 'FID-' + str(box) + '-Eta/'
@@ -60,7 +60,7 @@ for box in range(1, 7):
 # ----- import data
 Box_id = pd.read_csv(
     # the ids of boxes, together with the E-OBS grid ids within the boxes
-    'D:/WEI_RWG/GIS/ASCII/EOBS540_BOX100_union_IDs.csv',
+    ws + 'EOBS540_BOX100_union_IDs.csv',
     header=0, sep=','
 ).dropna().reset_index(drop=True)
 FIDs = Box_id['fid'].unique()  # an 1-D array
@@ -81,6 +81,12 @@ dGEV_para = xWEI_EtA.GEV_para_derive(dGEV_para)
 date_series = pd.date_range(datetime.datetime.strptime('1950-01-01', '%Y-%m-%d'),
                             datetime.datetime.strptime('2021-12-31', '%Y-%m-%d'),
                             freq='D')
+df_date_series = pd.DataFrame(
+    {'y': date_series.strftime('%Y').astype('int').to_list(),
+     'm': date_series.strftime('%m').astype('int').to_list(),
+     'd': date_series.strftime('%d').astype('int').to_list()
+     }
+)
 len(date_series)  # the length of the daily rainfall observations
 # df_rr.shape
 
@@ -88,11 +94,11 @@ durations = [24, 48, 72, 96]  # 4 durations
 duration_levels = [str(duration) for duration in durations]
 scaling = np.log(10000) / np.log(100)
 
-ws_RWG_output = 'Y:/ClimXtreme/RWG/Output/sim_rr_tg_tn_tx_corrected/'
-runs = range(1, 101)   # RWG runs; range(100, 0, -1)
+ws_RWG_output = ws + 'RWG_output_rr/'
+runs = range(20, 40, 1)   # RWG runs; range(100, 0, -1)
 for run in runs:
     df_name = 'rr_sim_non_cla6_B2_' + str(run) + '.txt'
-    fp_xwei = ws + 'xWEI/output/RWG_' + 'rr_sim_non_cla6_B2_' + str(run) + '.csv'
+    fp_xwei = ws + 'output/RWG_' + 'rr_sim_non_cla6_B2_' + str(run) + '.csv'
     if not os.path.exists(fp_xwei):
         df_rr = pd.read_csv(
             # df for the generated daily rainfall
@@ -125,14 +131,20 @@ for run in runs:
             # filter the rr_data for the domain
             # only the data array, without the date columns
             ri_data_domain = df_rr.iloc[:, Box_id_domain.EOBS_ID - 1]
-
+            df_threshold_mean = pd.concat([df_date_series, ri_data_domain.mean(axis=1)],
+                                          axis=1).set_axis(['y',  'm', 'd', 'rr'],
+                                                           axis=1, inplace=False)
+            df_threshold_mean = df_threshold_mean.query('rr > 0').groupby(['y']).rr.quantile(0.97)
             xWEI = []
             dates = []
             for i in range(0, len(date_series) - (len(durations) - 1)):
-                if ri_data_domain.iloc[i, :].mean() > 0:
+                date = date_series[i].strftime('%Y-%m-%d')
+                rr_threshold_mean = df_threshold_mean.loc[int(date_series[i].strftime('%Y'))]
+                df_rr_1 = ri_data_domain.iloc[range(i, i + 4), :].T.reset_index(drop=True)
+                rr_mean_check = (df_rr_1.mean(axis=0) > rr_threshold_mean).sum(axis=0)
+                if rr_mean_check > 0:  # ri_data_domain.iloc[i, :].mean() > rr_threshold_mean
                     # iterate each day (mean rainfall > 0: rainy day), then compute the EtA
                     # extraction: rr field for one EPE
-                    df_rr_1 = ri_data_domain.iloc[range(i, i + 4), :].T.reset_index(drop=True)
                     EtA_df = xWEI_EtA.EtA_curve_Mul(df_rr_1, dGEV_para_domain, Area=EOBS_area, durations=durations)
                     df = xWEI_EtA.inter_df(EtA_df, durations=durations)
                     xwei = xWEI_weight.xWEI_weight(
@@ -140,7 +152,6 @@ for run in runs:
                         vtx, wts, resolution=1000,
                         duration_levels=duration_levels
                     ) * scaling
-                    date = date_series[i].strftime('%Y-%m-%d')
                     xWEI.append(xwei)
                     dates.append(date)
                     print('RUN_' + str(run) + ': BOX_' + str(fid) + ': ' + date)
